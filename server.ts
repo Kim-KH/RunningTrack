@@ -3,11 +3,16 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import cors from "cors";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("running.db");
+// Use absolute path for database to ensure stability in different environments
+const dbPath = path.join(__dirname, "running.db");
+const db = new Database(dbPath);
+
+console.log(`Database initialized at: ${dbPath}`);
 
 // Initialize database
 db.exec(`
@@ -24,29 +29,54 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors()); // Enable CORS for all origins to support various Webview environments
   app.use(express.json());
+
+  // Request Logging Middleware
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
 
   // API Routes
   app.post("/api/runs", (req, res) => {
-    const { distance, duration, steps } = req.body;
-    const stmt = db.prepare("INSERT INTO runs (distance, duration, steps) VALUES (?, ?, ?)");
-    const info = stmt.run(distance, duration, steps);
-    res.json({ id: info.lastInsertRowid });
+    try {
+      const { distance, duration, steps } = req.body;
+      console.log("Saving run:", { distance, duration, steps });
+      
+      const stmt = db.prepare("INSERT INTO runs (distance, duration, steps) VALUES (?, ?, ?)");
+      const info = stmt.run(distance, duration, steps);
+      
+      res.json({ id: info.lastInsertRowid, success: true });
+    } catch (error: any) {
+      console.error("Error saving run:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.get("/api/runs", (req, res) => {
-    const runs = db.prepare("SELECT * FROM runs ORDER BY timestamp DESC").all();
-    res.json(runs);
+    try {
+      const runs = db.prepare("SELECT * FROM runs ORDER BY timestamp DESC").all();
+      res.json(runs);
+    } catch (error: any) {
+      console.error("Error fetching runs:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.get("/api/stats", (req, res) => {
-    const stats = {
-      daily: db.prepare("SELECT date(timestamp) as date, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY date(timestamp) ORDER BY date DESC LIMIT 7").all(),
-      weekly: db.prepare("SELECT strftime('%Y-%W', timestamp) as week, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY week ORDER BY week DESC LIMIT 4").all(),
-      monthly: db.prepare("SELECT strftime('%Y-%m', timestamp) as month, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY month ORDER BY month DESC LIMIT 12").all(),
-      yearly: db.prepare("SELECT strftime('%Y', timestamp) as year, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY year ORDER BY year DESC").all()
-    };
-    res.json(stats);
+    try {
+      const stats = {
+        daily: db.prepare("SELECT date(timestamp) as date, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY date(timestamp) ORDER BY date DESC LIMIT 7").all(),
+        weekly: db.prepare("SELECT strftime('%Y-%W', timestamp) as week, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY week ORDER BY week DESC LIMIT 4").all(),
+        monthly: db.prepare("SELECT strftime('%Y-%m', timestamp) as month, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY month ORDER BY month DESC LIMIT 12").all(),
+        yearly: db.prepare("SELECT strftime('%Y', timestamp) as year, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY year ORDER BY year DESC").all()
+      };
+      res.json(stats);
+    } catch (error: any) {
+      console.error("Error fetching stats:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Vite middleware for development
@@ -68,4 +98,6 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});

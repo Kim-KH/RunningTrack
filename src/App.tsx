@@ -132,21 +132,30 @@ export default function App() {
   const fetchRuns = async () => {
     try {
       setErrorMsg(null);
-      const res = await fetch('/api/runs');
-      if (!res.ok) throw new Error('Server response not OK');
+      const res = await fetch('/api/runs', {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(`Server Error: ${res.status} ${errorData.error || ''}`);
+      }
       const data = await res.json();
       setRuns(data);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch runs', e);
-      setErrorMsg('Failed to load history. Check connection.');
+      setErrorMsg(`History Load Error: ${e.message}`);
     }
   };
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      setStats(data);
+      const res = await fetch('/api/stats', {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStats(data);
+      }
     } catch (e) {
       console.error('Failed to fetch stats', e);
     }
@@ -154,15 +163,23 @@ export default function App() {
 
   const saveRun = async () => {
     try {
-      await fetch('/api/runs', {
+      setErrorMsg(null);
+      const res = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ distance, duration, steps }),
       });
-      fetchRuns();
-      fetchStats();
-    } catch (e) {
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(`Save Failed: ${res.status} ${errorData.error || ''}`);
+      }
+      
+      await fetchRuns();
+      await fetchStats();
+    } catch (e: any) {
       console.error('Failed to save run', e);
+      setErrorMsg(`Save Error: ${e.message}`);
     }
   };
 
@@ -275,9 +292,17 @@ export default function App() {
       </div>
 
       {errorMsg && (
-        <div className="bg-rose-50 border border-rose-100 p-3 rounded-xl flex items-center gap-2 text-rose-600 text-sm">
-          <VolumeX size={16} />
-          {errorMsg}
+        <div className="bg-rose-50 border border-rose-100 p-3 rounded-xl flex flex-col gap-2 text-rose-600 text-sm">
+          <div className="flex items-center gap-2">
+            <VolumeX size={16} />
+            <span className="font-medium">{errorMsg}</span>
+          </div>
+          <button 
+            onClick={() => { fetchRuns(); fetchStats(); }}
+            className="text-xs font-bold bg-rose-100 hover:bg-rose-200 py-1 px-3 rounded-lg self-start transition-colors"
+          >
+            Retry Loading
+          </button>
         </div>
       )}
 
