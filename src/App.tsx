@@ -58,6 +58,9 @@ export default function App() {
   const [lastAlertDistance, setLastAlertDistance] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'searching' | 'active' | 'error'>('searching');
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   // Settings
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -66,22 +69,53 @@ export default function App() {
   const watchId = useRef<number | null>(null);
   const lastPosition = useRef<GeolocationCoordinates | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const stepRef = useRef<number>(0);
+  const lastStepTime = useRef<number>(0);
 
   // --- Effects ---
   useEffect(() => {
     fetchRuns();
     fetchStats();
+    
+    // Request Motion Permissions for iOS
+    if (typeof (DeviceMotionEvent as any)?.requestPermission === 'function') {
+      (DeviceMotionEvent as any).requestPermission();
+    }
   }, []);
 
   useEffect(() => {
     if (isTracking) {
       startTracking();
+      window.addEventListener('devicemotion', handleMotion);
     } else {
       stopTracking();
+      window.removeEventListener('devicemotion', handleMotion);
     }
-    return () => stopTracking();
+    return () => {
+      stopTracking();
+      window.removeEventListener('devicemotion', handleMotion);
+    };
   }, [isTracking]);
+
+  // Accelerometer Step Counting (Treadmill/Stationary mode)
+  const handleMotion = (event: DeviceMotionEvent) => {
+    const acc = event.accelerationIncludingGravity;
+    if (!acc) return;
+
+    const totalAcc = Math.sqrt((acc.x || 0)**2 + (acc.y || 0)**2 + (acc.z || 0)**2);
+    const now = Date.now();
+    
+    // Simple peak detection for steps (threshold ~12-15 m/s^2)
+    if (totalAcc > 13 && now - lastStepTime.current > 300) {
+      setSteps(prev => prev + 1);
+      lastStepTime.current = now;
+      
+      // If stationary, we can estimate distance from steps (approx 0.7m per step)
+      // Only add to distance if GPS isn't providing significant movement
+      if (gpsAccuracy && gpsAccuracy > 20) { 
+        setDistance(prev => prev + 0.7);
+      }
+    }
+  };
 
   // Audio Alerts Logic
   useEffect(() => {
@@ -97,11 +131,14 @@ export default function App() {
   // --- API Calls ---
   const fetchRuns = async () => {
     try {
+      setErrorMsg(null);
       const res = await fetch('/api/runs');
+      if (!res.ok) throw new Error('Server response not OK');
       const data = await res.json();
       setRuns(data);
     } catch (e) {
       console.error('Failed to fetch runs', e);
+      setErrorMsg('Failed to load history. Check connection.');
     }
   };
 
@@ -135,6 +172,7 @@ export default function App() {
     setDuration(0);
     setSteps(0);
     setLastAlertDistance(0);
+    setGpsStatus('searching');
     lastPosition.current = null;
 
     // Timer
@@ -146,6 +184,9 @@ export default function App() {
     if ("geolocation" in navigator) {
       watchId.current = navigator.geolocation.watchPosition(
         (position) => {
+          setGpsStatus('active');
+          setGpsAccuracy(position.coords.accuracy);
+          
           if (lastPosition.current) {
             const d = calculateDistance(
               lastPosition.current.latitude,
@@ -153,18 +194,25 @@ export default function App() {
               position.coords.latitude,
               position.coords.longitude
             );
-            // Filter out noise (e.g., if accuracy is low or movement is tiny)
-            if (d > 2 && position.coords.accuracy < 30) {
+            
+            // Filter out noise
+            if (d > 1 && position.coords.accuracy < 50) {
               setDistance(prev => prev + d);
-              // Simple step estimation: ~1.3 steps per meter for running
-              setSteps(prev => prev + Math.round(d * 1.3));
+              // If we have GPS movement, we don't need to estimate from accelerometer
             }
           }
           lastPosition.current = position.coords;
         },
-        (err) => console.error(err),
-        { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+        (err) => {
+          console.error(err);
+          setGpsStatus('error');
+          setErrorMsg(`GPS Error: ${err.message}`);
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
       );
+    } else {
+      setGpsStatus('error');
+      setErrorMsg('Geolocation not supported');
     }
   };
 
@@ -225,6 +273,13 @@ export default function App() {
           <SettingsIcon size={24} />
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="bg-rose-50 border border-rose-100 p-3 rounded-xl flex items-center gap-2 text-rose-600 text-sm">
+          <VolumeX size={16} />
+          {errorMsg}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
@@ -295,6 +350,20 @@ export default function App() {
 
   const renderActiveRun = () => (
     <div className="h-full flex flex-col bg-slate-900 text-white p-8">
+      {/* Status Bar */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2">
+          <div className={cn(
+            "w-2 h-2 rounded-full animate-pulse",
+            gpsStatus === 'active' ? "bg-emerald-500" : gpsStatus === 'searching' ? "bg-amber-500" : "bg-rose-500"
+          )} />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            {gpsStatus === 'active' ? `GPS Active (${gpsAccuracy?.toFixed(0)}m)` : gpsStatus === 'searching' ? 'Searching GPS...' : 'GPS Error'}
+          </span>
+        </div>
+        {audioEnabled && <Volume2 size={14} className="text-emerald-400" />}
+      </div>
+
       <div className="flex-1 flex flex-col items-center justify-center space-y-12">
         <div className="text-center">
           <p className="text-slate-400 font-medium uppercase tracking-widest text-sm mb-2">Distance</p>
