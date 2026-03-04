@@ -39,7 +39,9 @@ async function startServer() {
   });
 
   // API Routes
-  app.post("/api/runs", (req, res) => {
+  const API_BASE = (process.env.APP_URL || "").replace(/\/$/, "");
+
+  app.post(["/api/runs", "/api/runs/"], (req, res) => {
     try {
       const { distance, duration, steps } = req.body;
       console.log("Saving run:", { distance, duration, steps });
@@ -54,7 +56,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/runs", (req, res) => {
+  app.get(["/api/runs", "/api/runs/"], (req, res) => {
     try {
       const runs = db.prepare("SELECT * FROM runs ORDER BY timestamp DESC").all();
       res.json(runs);
@@ -64,7 +66,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/stats", (req, res) => {
+  app.get(["/api/stats", "/api/stats/"], (req, res) => {
     try {
       const stats = {
         daily: db.prepare("SELECT date(timestamp) as date, SUM(distance) as distance, SUM(steps) as steps FROM runs GROUP BY date(timestamp) ORDER BY date DESC LIMIT 7").all(),

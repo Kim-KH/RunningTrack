@@ -48,6 +48,7 @@ type View = 'dashboard' | 'active-run' | 'history' | 'stats' | 'settings';
 
 // --- Constants ---
 const ALERT_INTERVALS = [500, 1000, 2000, 3000, 4000, 5000, 10000];
+const API_BASE = (process.env.APP_URL || window.location.origin).replace(/\/$/, "");
 
 export default function App() {
   const [view, setView] = useState<View>('dashboard');
@@ -132,7 +133,7 @@ export default function App() {
   const fetchRuns = async () => {
     try {
       setErrorMsg(null);
-      const res = await fetch('/api/runs', {
+      const res = await fetch(`${API_BASE}/api/runs`, {
         headers: { 'Cache-Control': 'no-cache' }
       });
       if (!res.ok) {
@@ -149,7 +150,7 @@ export default function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats', {
+      const res = await fetch(`${API_BASE}/api/stats`, {
         headers: { 'Cache-Control': 'no-cache' }
       });
       if (res.ok) {
@@ -164,7 +165,7 @@ export default function App() {
   const saveRun = async () => {
     try {
       setErrorMsg(null);
-      const res = await fetch('/api/runs', {
+      const res = await fetch(`${API_BASE}/api/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ distance, duration, steps }),
